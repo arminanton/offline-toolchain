@@ -803,6 +803,28 @@ install_iac_assets() {
   done
 }
 
+install_podcache_wrappers_from_module() {
+  local module_root compat
+  module_root="$1"
+  compat="$module_root/podcache-compat"
+  [ -d "$compat" ] || return 0
+  [ -x "$compat/bin/podman" ] || { log "podcache wrapper missing: $compat/bin/podman"; exit 1; }
+  [ -x "$compat/bin/docker" ] || { log "podcache wrapper missing: $compat/bin/docker"; exit 1; }
+  [ -f "$compat/libexec/podcache" ] || { log "podcache wrapper missing: $compat/libexec/podcache"; exit 1; }
+  [ -d "$compat/lib/podcache" ] || { log "podcache wrapper missing: $compat/lib/podcache"; exit 1; }
+  mkdir -p "$PREFIX/bin" "$PREFIX/lib" "$PREFIX/libexec"
+  rm -rf "$PREFIX/lib/podcache"
+  copy_tree_contents "$compat/lib/podcache" "$PREFIX/lib/podcache"
+  cp -f "$compat/libexec/podcache" "$PREFIX/libexec/podcache"
+  cp -f "$compat/bin/podman" "$PREFIX/bin/podman"
+  cp -f "$compat/bin/docker" "$PREFIX/bin/docker"
+  chmod +x \
+    "$PREFIX/libexec/podcache" \
+    "$PREFIX/bin/podman" \
+    "$PREFIX/bin/docker"
+  ln -sfn "$PREFIX/libexec/podcache" "$PREFIX/bin/podcache"
+}
+
 install_podman_assets() {
   local assets_dir="$1" archive bin
   archive="$assets_dir/podman/podman-tools-${ARCH}.tar.gz"
@@ -813,8 +835,14 @@ install_podman_assets() {
     [ -x "$bin" ] || continue
     ln -sfn "$bin" "$PREFIX/bin/$(basename "$bin")"
   done < <(find "$PREFIX/podman/current" \
-    \( -type f -o -type l \) -path '*/bin/*' | sort)
-  [ -x "$PREFIX/bin/podman" ] && [ "${PODMAN_LINK_DOCKER_ALIAS:-yes}" = "yes" ] && ln -sfn "$PREFIX/bin/podman" "$PREFIX/bin/docker" || true
+    -path '*/podcache-compat/*' -prune -o \
+    \( -type f -o -type l \) -path '*/bin/*' -print | sort)
+  install_podcache_wrappers_from_module "$PREFIX/podman/current"
+  if [ ! -x "$PREFIX/bin/docker" ] &&
+    [ -x "$PREFIX/bin/podman" ] &&
+    [ "${PODMAN_LINK_DOCKER_ALIAS:-yes}" = "yes" ]; then
+    ln -sfn "$PREFIX/bin/podman" "$PREFIX/bin/docker"
+  fi
 }
 
 install_images_assets() {
@@ -920,6 +948,8 @@ validate_installed_modules() {
       podman)
         [ -x "$PREFIX/bin/podman5" ] && "$PREFIX/bin/podman5" --version >/dev/null 2>&1 || true
         [ -x "$PREFIX/bin/podman4" ] && "$PREFIX/bin/podman4" --version >/dev/null 2>&1 || true
+        [ -x "$PREFIX/bin/podman" ] && "$PREFIX/bin/podman" version >/dev/null 2>&1 || true
+        [ -x "$PREFIX/bin/docker" ] && "$PREFIX/bin/docker" version >/dev/null 2>&1 || true
         ;;
       images)
         [ -x "$PREFIX/bin/podman-load-offline-images" ] || true
